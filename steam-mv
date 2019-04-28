@@ -3,7 +3,6 @@
 # IMPORTS
 from glob import glob
 import numpy as np
-from os import chdir
 from pathlib import Path
 from shutil import move
 from vdf import parse
@@ -22,12 +21,14 @@ def inputNumber(prompt):
             pass
     return num
 
+
 def validChoice(list, prompt):
     list = np.array(list)
     choice = 0
     while not(np.any(choice == np.arange(len(list)) + 1)):
         choice = inputNumber(prompt)
     return choice
+
 
 def appMenu(options):
     # Displays a menu of options, asks user to choose.
@@ -71,10 +72,10 @@ def libMenu(options, exclude):
 # END FUNCTIONS
 
 # Default library
-default_lib = str(Path(Path.home()) / ".local" / "share" / "Steam")
+default_lib = Path(Path.home()) / ".local" / "share" / "Steam"
 
-# Create dictionary for library folders
-libfolders_list = [default_lib]
+# Create list for library folders
+libfolders_list = [str(default_lib)]
 
 # Parse libraryfolders.vdf
 libfolders_vdf = parse(open(Path(default_lib) / "steamapps" / "libraryfolders.vdf"))
@@ -92,31 +93,31 @@ for k, v in libfolders_vdf.items():
 app_list = []
 
 for i in range(len(libfolders_list)):
-    steamapps_dir = str(Path(libfolders_list[i]) / "steamapps")
-    chdir(steamapps_dir)
-    manifest_list = glob('appmanifest_*.acf')
+    steamapps_dir = Path(libfolders_list[i]) / "steamapps"
+    manifest_list = list(steamapps_dir.glob('appmanifest_*.acf'))
     
     for j in range(len(manifest_list)):
-        manifest = str(Path(steamapps_dir) / manifest_list[j])
+        manifest = Path(steamapps_dir) / manifest_list[j]
         app_vdf = parse(open(manifest))
         app_vdf = app_vdf['AppState']
 
         app_dict = {}
-        app_dict['name'] = app_vdf['name']
+        app_dict['name'] = str(app_vdf['name'])
         app_dict['library'] = str(libfolders_list[i])
         app_dict['installdir'] = str(Path(steamapps_dir) / "common" / app_vdf['installdir'])
-        app_dict['manifest'] = manifest
+        app_dict['manifest'] = str(manifest)
 
         app_list.append(app_dict)
 
 # Pick an app to move
 app_choice = app_list[int(appMenu(app_list)) - 1]
 
-# Pick a library to move the app to.
+# Pick a install folder.
 lib_choice = libfolders_list[int(libMenu(libfolders_list, app_choice['library'])) - 1]
 
 # move files.
-print("Moving files...")
+print("Moving " + app_choice['name'] + " to " + lib_choice + "...")
 move(app_choice['manifest'], Path(lib_choice) / "steamapps")
 move(app_choice['installdir'], Path(lib_choice) / "steamapps" / "common")
 print("Done.")
+exit()
