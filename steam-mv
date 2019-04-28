@@ -2,7 +2,7 @@
 
 # IMPORTS
 from glob import glob
-from numpy import any, arange, array
+import numpy as np
 from os import chdir
 from pathlib import Path
 from shutil import move
@@ -23,9 +23,9 @@ def inputNumber(prompt):
     return num
 
 def validChoice(list, prompt):
-    list = array(list)
+    list = np.array(list)
     choice = 0
-    while not(any(choice == arange(len(list)) + 1)):
+    while not(np.any(choice == np.arange(len(list)) + 1)):
         choice = inputNumber(prompt)
     return choice
 
@@ -63,7 +63,7 @@ def libMenu(options, exclude):
     print()
 
     # Get a valid menu choice
-    choice = validChoice(options, "Select a Steam library (Q to quit): ")
+    choice = validChoice(options, "Select an install folder (Q to quit): ")
     print()
     return choice
 
@@ -80,7 +80,7 @@ libfolders_list = [default_lib]
 libfolders_vdf = parse(open(Path(default_lib) / "steamapps" / "libraryfolders.vdf"))
 libfolders_vdf = libfolders_vdf['LibraryFolders']
 
-# Add custom library paths to libfolders_dict
+# Add custom library paths to libfolders_list
 for k, v in libfolders_vdf.items():
     try:
         int_k = int(k)
@@ -110,13 +110,10 @@ for i in range(len(libfolders_list)):
         app_list.append(app_dict)
 
 # Pick an app to move
-#print(libfolders_list)
 app_choice = app_list[int(appMenu(app_list)) - 1]
-#print(app_choice)
 
 # Pick a library to move the app to.
 lib_choice = libfolders_list[int(libMenu(libfolders_list, app_choice['library'])) - 1]
-#print(lib_choice)
 
 # move files.
 print("Moving files...")
