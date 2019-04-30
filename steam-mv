@@ -1,13 +1,58 @@
 #!/usr/bin/env python3
 
-# IMPORTS
-from glob import glob
+# Imports
 from pathlib import Path
 from shutil import move
 from vdf import parse
 
-# FUNCTIONS
-def inputNumber(prompt):
+# Config
+default_lib = Path.home() / ".local" / "share" / "Steam"
+
+
+# Data Functions
+def get_lib_data(default_lib):
+    # Create list for library folders
+    libfolders_list = [default_lib]
+
+    # Parse libraryfolders.vdf
+    with open(default_lib / "steamapps" / "libraryfolders.vdf") as f:
+        libfolders_vdf = parse(f)
+    libfolders_vdf = libfolders_vdf['LibraryFolders']
+
+    # Add custom library paths to libfolders_list
+    for k, v in libfolders_vdf.items():
+        try:
+            int(k)
+            libfolders_list.append(Path(v))
+        except ValueError:
+            pass
+    return libfolders_list
+
+
+def get_app_data(libfolders_list):
+    app_list = []
+    for i in range(len(libfolders_list)):
+        steamapps_dir = libfolders_list[i] / "steamapps"
+        manifest_list = list(steamapps_dir.glob('appmanifest_*.acf'))
+
+        for j in range(len(manifest_list)):
+            manifest = manifest_list[j]
+            with open(steamapps_dir / manifest) as f:
+                app_vdf = parse(f)
+            app_vdf = app_vdf['AppState']
+
+            app_dict = {}
+            app_dict['name'] = app_vdf['name']
+            app_dict['library'] = libfolders_list[i]
+            app_dict['installdir'] = app_vdf['installdir']
+            app_dict['manifest'] = manifest.parts[-1]
+
+            app_list.append(app_dict)
+    return app_list
+
+
+# Menu Functions
+def input_num(prompt):
     # Prompts user to input a number.
     while True:
         try:
@@ -21,101 +66,72 @@ def inputNumber(prompt):
     return num
 
 
-def validChoice(options, prompt):
+def validate(options, prompt):
     choice = None
     while not (choice in range(1, len(options) + 1)):
-        choice = inputNumber(prompt)
+        choice = input_num(prompt)
     return choice
 
 
-def appMenu(options):
+def app_menu(options):
     # Displays a menu of options, asks user to choose.
     # Returns a valid number corresponding to a list item.
     # options should be a list of dictionaries.
 
     # Build menu dictionary
     menu_dict = {}
-    for i in range(len(options)): 
-        name = "{:d}. {:s}".format(i+1, str(options[i]['name'])) 
+    for i in range(len(options)):
+        name = "{:d}. {:s}".format(i+1, options[i]['name'])
         library = str(options[i]['library'])
         menu_dict[name] = library
-    
-    # Get width
+
+    # Display menu options
     width_l = max(len(x) for x in menu_dict.keys()) + 4
-
-    # Display menu options
     for k, v in menu_dict.items():
-        print(str(k).ljust(width_l, '.') + str(v)) 
+        print(k.ljust(width_l, '.') + str(v))
     print()
 
     # Get a valid menu choice
-    choice = validChoice(options, "Select a Steam app to move (Q to quit): ")
+    choice = validate(options, "Select a Steam app to move (Q to quit): ")
     print()
     return choice
 
 
-def libMenu(options, exclude):
+def lib_menu(options, exclude):
     options.remove(exclude)
-    # Display menu options
+
+    # Build menu
     for i in range(len(options)):
-        print("{:d}. {:s}".format(i+1, options[i]))
+        print("{:d}. {:s}".format(i+1, str(options[i])))
     print()
 
     # Get a valid menu choice
-    choice = validChoice(options, "Select an install folder (Q to quit): ")
+    choice = validate(options, "Select an install folder (Q to quit): ")
     print()
     return choice
 
 
-# END FUNCTIONS
-
-# Default library
-default_lib = Path(Path.home()) / ".local" / "share" / "Steam"
-
-# Create list for library folders
-libfolders_list = [str(default_lib)]
-
-# Parse libraryfolders.vdf
-libfolders_vdf = parse(open(Path(default_lib) / "steamapps" / "libraryfolders.vdf"))
-libfolders_vdf = libfolders_vdf['LibraryFolders']
-
-# Add custom library paths to libfolders_list
-for k, v in libfolders_vdf.items():
-    try:
-        int_k = int(k)
-        libfolders_list.append(v)
-    except ValueError:
-        continue
-
-# App data
-app_list = []
-
-for i in range(len(libfolders_list)):
-    steamapps_dir = Path(libfolders_list[i]) / "steamapps"
-    manifest_list = list(steamapps_dir.glob('appmanifest_*.acf'))
-    
-    for j in range(len(manifest_list)):
-        manifest = Path(steamapps_dir) / manifest_list[j]
-        app_vdf = parse(open(manifest))
-        app_vdf = app_vdf['AppState']
-
-        app_dict = {}
-        app_dict['name'] = str(app_vdf['name'])
-        app_dict['library'] = str(libfolders_list[i])
-        app_dict['installdir'] = str(Path(steamapps_dir) / "common" / app_vdf['installdir'])
-        app_dict['manifest'] = str(manifest)
-
-        app_list.append(app_dict)
+libfolders_list = get_lib_data(default_lib)
+app_list = get_app_data(libfolders_list)
 
 # Pick an app to move
-app_choice = app_list[int(appMenu(app_list)) - 1]
+app_choice = int(app_menu(app_list)) - 1
+app_choice = app_list[app_choice]
 
-# Pick a install folder.
-lib_choice = libfolders_list[int(libMenu(libfolders_list, app_choice['library'])) - 1]
+# Pick an install folder.
+lib_choice = int(lib_menu(libfolders_list, app_choice['library'])) - 1
+lib_choice = libfolders_list[lib_choice]
 
-# move files.
-print("Moving " + app_choice['name'] + " to " + lib_choice + "...")
-move(app_choice['manifest'], Path(lib_choice) / "steamapps")
-move(app_choice['installdir'], Path(lib_choice) / "steamapps" / "common")
+# move files. Convert to strings for shutil.move.
+manifest_src = str(app_choice['library']
+                   / "steamapps" / app_choice['manifest'])
+manifest_dst = str(lib_choice / "steamapps")
+installdir_src = str(app_choice['library'] / "steamapps"
+                     / "common" / app_choice['installdir'])
+installdir_dst = str(lib_choice / "steamapps" / "common")
+
+print("Moving " + app_choice['name'] + " to " + str(lib_choice) + "...")
+move(manifest_src, manifest_dst)
+move(installdir_src, installdir_dst)
 print("Done.")
 exit()
