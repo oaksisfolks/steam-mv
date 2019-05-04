@@ -2,10 +2,11 @@
 
 # Imports
 from pathlib import Path
-from shutil import move
+from progress.bar import ShadyBar
+from shutil import move, rmtree
 from vdf import parse
 
-# Config
+# Define default library folder
 default_lib = {'path': Path.home() / ".local" / "share" / "Steam",
                'steamapps': "steamapps"}
 
@@ -16,7 +17,8 @@ def get_lib_data(default_lib):
     libfolders_list = [default_lib]
 
     # Parse libraryfolders.vdf
-    with open(default_lib['path'] / default_lib['steamapps'] / "libraryfolders.vdf") as f:
+    with open(default_lib['path'] / default_lib['steamapps']
+              / "libraryfolders.vdf") as f:
         libfolders_vdf = parse(f)
     libfolders_vdf = libfolders_vdf['LibraryFolders']
 
@@ -36,7 +38,8 @@ def get_lib_data(default_lib):
 def get_app_data(libfolders_list):
     app_list = []
     for i in range(len(libfolders_list)):
-        steamapps_dir = libfolders_list[i]['path'] / libfolders_list[i]['steamapps']
+        libfolder = libfolders_list[i]
+        steamapps_dir = libfolder['path'] / libfolder['steamapps']
         manifest_list = list(steamapps_dir.glob('appmanifest_*.acf'))
 
         for j in range(len(manifest_list)):
@@ -47,8 +50,8 @@ def get_app_data(libfolders_list):
 
             app_dict = {}
             app_dict['name'] = app_vdf['name']
-            app_dict['library'] = libfolders_list[i]['path']
-            app_dict['steamapps'] = libfolders_list[i]['steamapps']
+            app_dict['library'] = libfolder['path']
+            app_dict['steamapps'] = libfolder['steamapps']
             app_dict['installdir'] = app_vdf['installdir']
             app_dict['manifest'] = manifest.parts[-1]
 
@@ -79,9 +82,11 @@ def validate(options, prompt):
 
 
 def app_menu(options):
-    # Displays a menu of options, asks user to choose.
-    # Returns a valid number corresponding to a list item.
-    # options should be a list of dictionaries.
+    """
+    Displays a menu of options, asks user to choose.
+    Returns a valid number corresponding to a list item.
+    Options should be a list of dictionaries.
+    """
 
     # Build menu dictionary
     menu_dict = {}
@@ -116,6 +121,80 @@ def lib_menu(options, exclude):
     return choice
 
 
+# File operation functions
+def path_walk(top):
+    """
+    Directory tree generator using pathlib, similar to os.walk. Returns path
+    objects instead of strings. Top-down only. Exit on PermissionError. Don't
+    follow symlinks.
+
+    For each directory in the directory tree rooted at top (including top
+    itself, but excluding '.' and '..'), yields a 3-tuple
+
+        dirpath, dirnames, filenames
+
+    See source code for os.walk and pathlib docs for more details.
+    """
+
+    top = Path(top)
+    dirs = []
+    nondirs = []
+
+    try:
+        iterdir_it = top.iterdir()
+    except PermissionError as error:
+        exit(error)
+
+    while True:
+        try:
+            entry = next(iterdir_it)
+        except StopIteration:
+            break
+        is_dir = entry.is_dir()
+        if is_dir:
+            dirs.append(entry.name)
+        else:
+            nondirs.append(entry.name)
+
+    # Yield before recursion
+    yield top, dirs, nondirs
+
+    # Recurse into sub-directories
+    for dirname in dirs:
+        new_path = top / dirname
+        if not new_path.is_symlink():
+            yield from path_walk(new_path)
+
+
+def move_installdir(dir_src, dir_dst):
+    """
+    Walks the directory tree of dir_src, creating directories in dir_dst and
+    moving all files to their proper locations in dir_dst. Uses python-progress
+    library to show a progress bar based on the number of files in the
+    directory tree.
+    """
+
+    bar_max = 0
+    for dirpath_src, _, filenames in path_walk(dir_src):
+        for filename in filenames:
+            bar_max += 1
+
+    bar = ShadyBar('  Progress:', max=bar_max, suffix='%(percent)d%%')
+    for dirpath_src, _, filenames in path_walk(dir_src):
+        dirpath_dst = dir_dst / dirpath_src.relative_to(dir_src)
+        if not dirpath_dst.exists():
+            dirpath_dst.mkdir()
+        for filename in filenames:
+            src_file = dirpath_src / filename
+            dst_file = dirpath_dst / filename
+            if dst_file.exists():
+                dst_file.unlink()
+            move(str(src_file), str(dirpath_dst))
+            bar.next()
+    bar.finish()
+    rmtree(dir_src)
+
+
 libfolders_list = get_lib_data(default_lib)
 app_list = get_app_data(libfolders_list)
 
@@ -127,16 +206,18 @@ app_choice = app_list[app_choice]
 lib_choice = int(lib_menu(libfolders_list, app_choice['library'])) - 1
 lib_choice = libfolders_list[lib_choice]
 
-# move files. Convert to strings for shutil.move.
+# move files. Convert to strings for os.walk and shutil.move.
 manifest_src = str(app_choice['library']
                    / app_choice['steamapps'] / app_choice['manifest'])
 manifest_dst = str(lib_choice['path'] / lib_choice['steamapps'])
-installdir_src = str(app_choice['library'] / app_choice['steamapps']
-                     / "common" / app_choice['installdir'])
-installdir_dst = str(lib_choice['path'] / lib_choice['steamapps'] / "common")
+installdir_src = (app_choice['library'] / app_choice['steamapps']
+                  / "common" / app_choice['installdir'])
+installdir_dst = (lib_choice['path'] / lib_choice['steamapps']
+                  / "common" / app_choice['installdir'])
 
-print("Moving " + app_choice['name'] + " to " + str(lib_choice['path']) + "...")
+print("Moving " + app_choice['name'] + " to "
+      + str(lib_choice['path']) + "...")
 move(manifest_src, manifest_dst)
-move(installdir_src, installdir_dst)
-print("Done.")
+move_installdir(installdir_src, installdir_dst)
+print("\nDone.")
 exit()

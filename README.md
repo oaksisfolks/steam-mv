@@ -12,7 +12,7 @@ Move Steam applications with large files to another install folder.
 
 * Python 3.4 or newer.
 
-* Python module [vdf](https://github.com/ValvePython/vdf).
+* Python modules [vdf](https://github.com/ValvePython/vdf) and [progress](https://github.com/verigak/progress/).
 
 ### Usage:
 
