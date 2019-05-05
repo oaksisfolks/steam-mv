@@ -3,7 +3,8 @@
 # Imports
 from pathlib import Path
 from progress.bar import ShadyBar
-from shutil import move, rmtree
+import psutil
+from shutil import disk_usage, move, rmtree
 from vdf import parse
 
 # Define default library folder
@@ -56,10 +57,22 @@ def get_app_data(libfolders_list):
             app_dict['manifest'] = manifest.parts[-1]
 
             app_list.append(app_dict)
+    app_list = sorted(app_list, key=lambda app: app['name'])
     return app_list
 
 
 # Menu Functions
+def input_yn(prompt):
+    # prompts for yes/no input.
+    choice = None
+    while choice not in ("", "yes", "y", "no", "n"):
+        choice = input(prompt).lower()
+        if choice in ("", "yes", "y"):
+            return True
+        elif choice in ("no", "n"):
+            return False
+
+
 def input_num(prompt):
     # Prompts user to input a number.
     while True:
@@ -68,7 +81,7 @@ def input_num(prompt):
             num = int(num)
             break
         except ValueError:
-            if num.upper() == "Q":
+            if num.lower() == "q":
                 exit()
             pass
     return num
@@ -76,7 +89,7 @@ def input_num(prompt):
 
 def validate(options, prompt):
     choice = None
-    while not (choice in range(1, len(options) + 1)):
+    while choice not in range(1, len(options) + 1):
         choice = input_num(prompt)
     return choice
 
@@ -88,17 +101,22 @@ def app_menu(options):
     Options should be a list of dictionaries.
     """
 
-    # Build menu dictionary
-    menu_dict = {}
+    # Build menu tuples
+    menu_list = []
     for i in range(len(options)):
-        name = "{:d}. {:s}".format(i+1, options[i]['name'])
-        library = str(options[i]['library'])
-        menu_dict[name] = library
+        num = "{:d}.".format(i + 1)
+        name = options[i]['name']
+        lib = str(options[i]['library'])
+        menu_list.append((num, name, lib))
 
     # Display menu options
-    width_l = max(len(x) for x in menu_dict.keys()) + 4
-    for k, v in menu_dict.items():
-        print(k.ljust(width_l, '.') + str(v))
+    num_width = max([len(x[0]) for x in menu_list]) + 1
+    name_width = max([len(x[1]) for x in menu_list]) + 2
+    for i in range(len(menu_list)):
+        num = menu_list[i][0]
+        name = menu_list[i][1]
+        lib = menu_list[i][2]
+        print(num.ljust(num_width, ' ') + name.ljust(name_width, ".") + lib)
     print()
 
     # Get a valid menu choice
@@ -110,15 +128,41 @@ def app_menu(options):
 def lib_menu(options, exclude):
     options[:] = [d for d in options if d['path'] != exclude]
 
-    # Build menu
+    # Build menu tuples
+    menu_list = []
     for i in range(len(options)):
-        print("{:d}. {:s}".format(i+1, str(options[i]['path'])))
+        num = "{:d}.".format(i + 1)
+        lib = str(options[i]['path'])
+        menu_list.append((num, lib))
+
+    # Display menu options
+    num_width = max([len(x[0]) for x in menu_list]) + 1
+    for i in range(len(menu_list)):
+        num = menu_list[i][0]
+        lib = menu_list[i][1]
+        print(num.ljust(num_width, ' ') + lib)
     print()
 
     # Get a valid menu choice
     choice = validate(options, "Select an install folder (Q to quit): ")
     print()
     return choice
+
+
+# Check/Terminate Steam Process functions
+def check_proc(proc_name):
+    proc_pids = []
+    for proc in psutil.process_iter(attrs=['name', 'pid']):
+        if proc_name.lower() in proc.name().lower():
+            proc_pids.append(proc.pid)
+    if proc_pids:
+        return proc_pids
+
+
+def term_proc(proc_pids):
+    for pid in proc_pids:
+        proc = psutil.Process(pid)
+        proc.terminate()
 
 
 # File operation functions
@@ -166,20 +210,33 @@ def path_walk(top):
             yield from path_walk(new_path)
 
 
-def move_installdir(dir_src, dir_dst):
+def check_size(dir_src, lib_path):
+    # Stats for progress bar and size check.
+    lib_path = str(lib_path)
+    file_count = 0
+    total_size = 0
+    for dirpath_src, _, filenames in path_walk(dir_src):
+        total_size += dirpath_src.stat().st_size
+        for filename in filenames:
+            file_count += 1
+            filepath = dirpath_src / filename
+            total_size += filepath.stat().st_size
+    # Size check
+    free_space = disk_usage(lib_path).free
+    if total_size >= free_space:
+        print("You do not have enough free space in {:s}.".format(lib_path))
+        exit()
+    return file_count
+
+
+def move_installdir(dir_src, dir_dst, bar_max):
     """
     Walks the directory tree of dir_src, creating directories in dir_dst and
     moving all files to their proper locations in dir_dst. Uses python-progress
     library to show a progress bar based on the number of files in the
     directory tree.
     """
-
-    bar_max = 0
-    for dirpath_src, _, filenames in path_walk(dir_src):
-        for filename in filenames:
-            bar_max += 1
-
-    bar = ShadyBar('  Progress:', max=bar_max, suffix='%(percent)d%%')
+    bar = ShadyBar('  Progress:', max=bar_max)
     for dirpath_src, _, filenames in path_walk(dir_src):
         dirpath_dst = dir_dst / dirpath_src.relative_to(dir_src)
         if not dirpath_dst.exists():
@@ -195,6 +252,16 @@ def move_installdir(dir_src, dir_dst):
     rmtree(dir_src)
 
 
+# Terminate Steam if open
+steam_pids = check_proc("steam")
+if steam_pids:
+    if input_yn("Close Steam to continue? (YES/no): ") is True:
+        term_proc(steam_pids)
+        print()
+    else:
+        exit()
+
+# Get library and app lists
 libfolders_list = get_lib_data(default_lib)
 app_list = get_app_data(libfolders_list)
 
@@ -206,7 +273,7 @@ app_choice = app_list[app_choice]
 lib_choice = int(lib_menu(libfolders_list, app_choice['library'])) - 1
 lib_choice = libfolders_list[lib_choice]
 
-# move files. Convert to strings for os.walk and shutil.move.
+# Define sources and destinations.
 manifest_src = str(app_choice['library']
                    / app_choice['steamapps'] / app_choice['manifest'])
 manifest_dst = str(lib_choice['path'] / lib_choice['steamapps'])
@@ -214,10 +281,11 @@ installdir_src = (app_choice['library'] / app_choice['steamapps']
                   / "common" / app_choice['installdir'])
 installdir_dst = (lib_choice['path'] / lib_choice['steamapps']
                   / "common" / app_choice['installdir'])
+bar_size = check_size(installdir_src, lib_choice['path'])
 
 print("Moving " + app_choice['name'] + " to "
       + str(lib_choice['path']) + "...")
 move(manifest_src, manifest_dst)
-move_installdir(installdir_src, installdir_dst)
+move_installdir(installdir_src, installdir_dst, bar_size)
 print("\nDone.")
 exit()
