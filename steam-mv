@@ -21,13 +21,13 @@ def get_lib_data(default_lib):
     with open(default_lib['path'] / default_lib['steamapps']
               / "libraryfolders.vdf") as f:
         libfolders_vdf = parse(f)
-    libfolders_vdf = libfolders_vdf['LibraryFolders']
+    libfolders_vdf = libfolders_vdf['libraryfolders']
 
     # Add custom library paths to libfolders_list
     for k, v in libfolders_vdf.items():
         try:
             int(k)
-            next_lib = {'path': Path(v), 'steamapps': "steamapps"}
+            next_lib = {'path': Path(v['path']), 'steamapps': "steamapps"}
             if not (next_lib['path'] / next_lib['steamapps']).is_dir():
                 next_lib['steamapps'] = "SteamApps"
             libfolders_list.append(next_lib)
